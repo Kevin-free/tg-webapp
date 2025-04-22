@@ -1,12 +1,16 @@
 import type { FC } from '../../../lib/teact/teact';
 import React, {
-  memo, useEffect, useMemo, useRef,
+  memo, useEffect, useMemo, useRef, useState,
 } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
 import type { GlobalState } from '../../../global/types';
 import type { ISettings } from '../../../types';
 import { LeftColumnContent, SettingsScreens } from '../../../types';
+import type { ApiChat, ApiMessage } from '../../../api/types';
+
+// Type declaration to access the selectedChats from Chat.tsx
+// This is already declared in Chat.tsx
 
 import {
   APP_NAME,
@@ -24,6 +28,7 @@ import buildClassName from '../../../util/buildClassName';
 import captureEscKeyListener from '../../../util/captureEscKeyListener';
 import { formatDateToString } from '../../../util/dates/dateFormat';
 import { IS_APP, IS_ELECTRON, IS_MAC_OS } from '../../../util/windowEnvironment';
+import { getSelectedChats, clearSelectedChats, selectAllChats } from '../../../util/chatSelection';
 
 import useAppLayout from '../../../hooks/useAppLayout';
 import useConnectionStatus from '../../../hooks/useConnectionStatus';
@@ -34,6 +39,7 @@ import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
 import useOldLang from '../../../hooks/useOldLang';
 import { useFullscreenStatus } from '../../../hooks/window/useFullscreen';
+import useForceUpdate from '../../../hooks/useForceUpdate';
 import useLeftHeaderButtonRtlForumTransition from './hooks/useLeftHeaderButtonRtlForumTransition';
 
 import Icon from '../../common/icons/Icon';
@@ -48,6 +54,22 @@ import LeftSideMenuItems from './LeftSideMenuItems';
 import StatusButton from './StatusButton';
 
 import './LeftMainHeader.scss';
+
+// Add styles for header buttons
+const styleElement = document.createElement('style');
+styleElement.textContent = `
+  .selection-controls {
+    display: flex;
+    align-items: center;
+  }
+  
+  .import-selected-button,
+  .select-all-button,
+  .clear-selection-button {
+    margin-right: 0.5rem;
+  }
+`;
+document.head.appendChild(styleElement);
 
 type OwnProps = {
   shouldHideSearch?: boolean;
@@ -80,6 +102,56 @@ type StateProps =
 
 const CLEAR_DATE_SEARCH_PARAM = { date: undefined };
 const CLEAR_CHAT_SEARCH_PARAM = { id: undefined };
+
+// Add API functions for importing chats and messages
+const importGroups = async (chats: Record<string, ApiChat>) => {
+  try {
+    const response = await fetch('/import_groups', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ chats: Object.values(chats) }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Error importing groups: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Failed to import groups:', error);
+    throw error;
+  }
+};
+
+const importMessages = async (chats: Record<string, ApiChat>) => {
+  try {
+    // Get messages for each chat
+    const chatIds = Object.keys(chats);
+    const messages: ApiMessage[] = [];
+    
+    // In a real implementation, you would fetch messages for each chat
+    // This is a simplified version that just sends the chat IDs
+    
+    const response = await fetch('/import_messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ chatIds }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Error importing messages: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Failed to import messages:', error);
+    throw error;
+  }
+};
 
 const LeftMainHeader: FC<OwnProps & StateProps> = ({
   shouldHideSearch,
@@ -120,9 +192,59 @@ const LeftMainHeader: FC<OwnProps & StateProps> = ({
   const { isMobile } = useAppLayout();
 
   const [isBotMenuOpen, markBotMenuOpen, unmarkBotMenuOpen] = useFlag();
+  const [isImporting, markIsImporting, unmarkIsImporting] = useFlag();
+  const forceUpdate = useForceUpdate();
 
   const areContactsVisible = content === LeftColumnContent.Contacts;
   const hasMenu = content === LeftColumnContent.ChatList;
+  
+  // State to track selected chats count
+  const [selectedChatsCount, setSelectedChatsCount] = useState(0);
+  
+  // Update selected chats count when it changes
+  useEffect(() => {
+    const handleSelectedChatsChange = () => {
+      const selectedChats = getSelectedChats();
+      setSelectedChatsCount(Object.keys(selectedChats).length);
+    };
+
+    document.addEventListener('selectedChatsChange', handleSelectedChatsChange);
+    return () => {
+      document.removeEventListener('selectedChatsChange', handleSelectedChatsChange);
+    };
+  }, []);
+  
+  const handleImportSelected = useLastCallback(async () => {
+    const selectedChats = getSelectedChats();
+    if (Object.keys(selectedChats).length > 0) {
+      try {
+        markIsImporting();
+        
+        // Call the API endpoints
+        await importGroups(selectedChats);
+        await importMessages(selectedChats);
+        
+        // Clear selection after successful import
+        document.dispatchEvent(new CustomEvent('clearSelectedChats'));
+        
+        forceUpdate();
+      } catch (error) {
+        console.error('Import failed:', error);
+      } finally {
+        unmarkIsImporting();
+      }
+    }
+  });
+  
+  // Simplified approach for select all
+  const handleSelectAll = useLastCallback(() => {
+    // We'll create a custom event that our Chat components will listen to
+    document.dispatchEvent(new CustomEvent('selectAllChats'));
+  });
+  
+  const handleClearSelection = useLastCallback(() => {
+    clearSelectedChats();
+  });
 
   const selectedSearchDate = useMemo(() => {
     return searchDate
@@ -301,6 +423,46 @@ const LeftMainHeader: FC<OwnProps & StateProps> = ({
             canShow={withStoryToggler}
           />
         </SearchInput>
+        {content === LeftColumnContent.ChatList && (
+          <div className="selection-controls">
+            {selectedChatsCount > 0 && (
+              <Button
+                round
+                ripple={!isMobile}
+                size="smaller"
+                color="translucent"
+                className="clear-selection-button"
+                ariaLabel="Clear Selection"
+                onClick={handleClearSelection}
+              >
+                <Icon name="close" />
+              </Button>
+            )}
+            <Button
+              round
+              ripple={!isMobile}
+              size="smaller"
+              color="translucent"
+              className="select-all-button"
+              ariaLabel="Select All"
+              onClick={handleSelectAll}
+            >
+              <Icon name="select" />
+            </Button>
+            <Button
+              round
+              ripple={!isMobile}
+              size="smaller"
+              color="translucent"
+              className="import-selected-button"
+              ariaLabel="Import Selected"
+              onClick={handleImportSelected}
+              disabled={selectedChatsCount === 0}
+            >
+              <Icon name="download" />
+            </Button>
+          </div>
+        )}
         {isCurrentUserPremium && <StatusButton />}
         {hasPasscode && (
           <Button

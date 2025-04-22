@@ -1,5 +1,5 @@
 import type { FC } from '../../../lib/teact/teact';
-import React, { memo, useEffect, useMemo } from '../../../lib/teact/teact';
+import React, { memo, useEffect, useMemo, useState, useRef } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
 import type {
@@ -14,6 +14,7 @@ import type {
   ApiUser,
   ApiUserStatus,
 } from '../../../api/types';
+import type { GlobalState } from '../../../global/types';
 import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { ChatAnimationTypes } from './hooks';
 import { MAIN_THREAD_ID } from '../../../api/types';
@@ -49,7 +50,9 @@ import {
   selectUserStatus,
 } from '../../../global/selectors';
 import buildClassName from '../../../util/buildClassName';
+import { toggleChatSelection, isChatSelected } from '../../../util/chatSelection';
 import { createLocationHash } from '../../../util/routing';
+
 import { IS_OPEN_IN_NEW_TAB_SUPPORTED } from '../../../util/windowEnvironment';
 
 import useSelectorSignal from '../../../hooks/data/useSelectorSignal';
@@ -57,6 +60,7 @@ import useAppLayout from '../../../hooks/useAppLayout';
 import useChatContextActions from '../../../hooks/useChatContextActions';
 import useEnsureMessage from '../../../hooks/useEnsureMessage';
 import useFlag from '../../../hooks/useFlag';
+import useForceUpdate from '../../../hooks/useForceUpdate';
 import { useIsIntersecting } from '../../../hooks/useIntersectionObserver';
 import useLastCallback from '../../../hooks/useLastCallback';
 import useShowTransitionDeprecated from '../../../hooks/useShowTransitionDeprecated';
@@ -73,8 +77,31 @@ import ChatFolderModal from '../ChatFolderModal.async';
 import MuteChatModal from '../MuteChatModal.async';
 import ChatBadge from './ChatBadge';
 import ChatCallStatus from './ChatCallStatus';
+import Checkbox from '../../ui/Checkbox';
 
 import './Chat.scss';
+
+// Add styles for checkbox and selected state
+const styleElement = document.createElement('style');
+styleElement.textContent = `
+  .chat-checkbox {
+    margin-right: 0.5rem;
+    margin-left: 0.5rem;
+  }
+  
+  .ListItem.chat-item .chat-checkbox {
+    opacity: 0.7;
+  }
+  
+  .ListItem.chat-item:hover .chat-checkbox {
+    opacity: 1;
+  }
+
+  .ListItem.chat-item.selected-chat {
+    background-color: var(--color-chat-active);
+  }
+`;
+document.head.appendChild(styleElement);
 
 type OwnProps = {
   chatId: string;
@@ -172,93 +199,56 @@ const Chat: FC<OwnProps & StateProps> = ({
   const [shouldRenderDeleteModal, markRenderDeleteModal, unmarkRenderDeleteModal] = useFlag();
   const [shouldRenderMuteModal, markRenderMuteModal, unmarkRenderMuteModal] = useFlag();
   const [shouldRenderChatFolderModal, markRenderChatFolderModal, unmarkRenderChatFolderModal] = useFlag();
+  const [isMultiSelected, setIsMultiSelected] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const { isForum, isForumAsMessages } = chat || {};
-
-  useEnsureMessage(isSavedDialog ? currentUserId : chatId, lastMessageId, lastMessage);
-
-  const { renderSubtitle, ref } = useChatListEntry({
-    chat,
-    chatId,
-    lastMessage,
-    typingStatus,
-    draft,
-    statefulMediaContent: groupStatefulContent({ story: lastMessageStory }),
-    lastMessageTopic,
-    lastMessageSender,
-    observeIntersection,
-    animationType,
-    withInterfaceAnimations,
-    orderDiff,
-    isSavedDialog,
-    isPreview,
-    topics,
-  });
-
-  const getIsForumPanelClosed = useSelectorSignal(selectIsForumPanelClosed);
-
-  const handleClick = useLastCallback(() => {
-    const noForumTopicPanel = isMobile && isForumAsMessages;
-
-    if (isMobile) {
-      setShouldCloseRightColumn({ value: true });
-    }
-
-    if (isPreview) {
-      focusMessage({
-        chatId,
-        messageId: previewMessageId!,
-      });
-      return;
-    }
-
-    if (isSavedDialog) {
-      openSavedDialog({ chatId, noForumTopicPanel: true }, { forceOnHeavyAnimation: true });
-
-      if (isMobile) {
-        toggleChatInfo({ force: false });
+  // Update multi-selection state when selection changes
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      setIsMultiSelected(isChatSelected(chatId));
+    };
+    
+    // Handle the selectAllChats event for this chat
+    const handleSelectAll = () => {
+      if (chat) {
+        toggleChatSelection(chatId, chat);
       }
-      return;
-    }
+    };
+    
+    handleSelectionChange(); // Initialize state
+    document.addEventListener('selectedChatsChange', handleSelectionChange);
+    document.addEventListener('selectAllChats', handleSelectAll);
+    
+    return () => {
+      document.removeEventListener('selectedChatsChange', handleSelectionChange);
+      document.removeEventListener('selectAllChats', handleSelectAll);
+    };
+  }, [chatId, chat]);
 
-    if (isForum) {
-      if (isForumPanelOpen) {
-        closeForumPanel(undefined, { forceOnHeavyAnimation: true });
-
-        return;
-      } else {
-        if (!noForumTopicPanel) {
-          openForumPanel({ chatId }, { forceOnHeavyAnimation: true });
-        }
-
-        if (!isForumAsMessages) return;
-      }
-    }
-
-    openChat({ id: chatId, noForumTopicPanel, shouldReplaceHistory: true }, { forceOnHeavyAnimation: true });
-
-    if (isSelected && canScrollDown) {
-      focusLastMessage();
-    }
-  });
-
-  const handleDragEnter = useLastCallback((e) => {
+  const handleClick = useLastCallback((e: React.MouseEvent<HTMLElement>) => {
+    // 阻止事件冒泡和默认行为
     e.preventDefault();
-    onDragEnter?.(chatId);
+    e.stopPropagation();
+    
+    // 直接触发切换选中状态 - 这确保了点击和再次点击能够正确切换
+    toggleChatSelection(chatId, chat);
+  });
+
+  const handleDragEnter = useLastCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (onDragEnter) {
+      onDragEnter(chatId);
+    }
   });
 
   const handleDelete = useLastCallback(() => {
-    markRenderDeleteModal();
     openDeleteModal();
   });
 
   const handleMute = useLastCallback(() => {
-    markRenderMuteModal();
     openMuteModal();
   });
 
   const handleChatFolderChange = useLastCallback(() => {
-    markRenderChatFolderModal();
     openChatFolderModal();
   });
 
@@ -270,31 +260,33 @@ const Chat: FC<OwnProps & StateProps> = ({
   const contextActions = useChatContextActions({
     chat,
     user,
-    handleDelete,
-    handleMute,
-    handleChatFolderChange,
-    handleReport,
+    canChangeFolder,
+    handleDelete: openDeleteModal,
+    handleMute: openMuteModal,
+    handleChatFolderChange: openChatFolderModal,
     folderId,
     isPinned,
     isMuted,
-    canChangeFolder,
     isSavedDialog,
-    currentUserId,
-    isPreview,
-    topics,
   });
 
-  const isIntersecting = useIsIntersecting(ref, chat ? observeIntersection : undefined);
+  const isIntersecting = useIsIntersecting(containerRef, chat ? observeIntersection : undefined);
 
   // Load the forum topics to display unread count badge
   useEffect(() => {
-    if (isIntersecting && isForum && isSynced && listedTopicIds === undefined) {
+    if (isIntersecting && chat?.isForum && isSynced && listedTopicIds === undefined) {
       loadTopics({ chatId });
     }
-  }, [chatId, listedTopicIds, isSynced, isForum, isIntersecting]);
+  }, [chatId, listedTopicIds, isSynced, chat?.isForum, isIntersecting]);
 
+  // 处理在线状态和界面转换
   const isOnline = user && userStatus && isUserOnline(user, userStatus);
   const { hasShownClass: isAvatarOnlineShown } = useShowTransitionDeprecated(isOnline);
+  
+  // 修复类型比较问题 - animationType可能是'none'或其他值
+  const hasAnimation = Boolean(animationType) && String(animationType) !== 'none';
+  const { transitionClassNames } = useShowTransitionDeprecated(hasAnimation, undefined, undefined, false);
+  const getIsForumPanelClosed = useSelectorSignal(selectIsForumPanelClosed);
 
   const href = useMemo(() => {
     if (!IS_OPEN_IN_NEW_TAB_SUPPORTED) return undefined;
@@ -314,25 +306,40 @@ const Chat: FC<OwnProps & StateProps> = ({
 
   const chatClassName = buildClassName(
     'Chat chat-item-clickable',
-    isUserId(chatId) ? 'private' : 'group',
-    isForum && 'forum',
+    isMuted && 'chat-item-muted',
     isSelected && 'selected',
-    isSelectedForum && 'selected-forum',
-    isPreview && 'standalone',
+    isMultiSelected && 'selected-chat',
+    isSavedDialog && 'saved-dialog',
+    isPreview && 'chat-item-preview',
+    chat?.hasUnreadMark && 'has-unread-mark',
+    user && isUserOnline(user, userStatus) && 'online',
     className,
+  );
+
+  // Function to render the checkbox
+  const renderCheckbox = () => (
+    <div className="chat-checkbox">
+      <Checkbox
+        checked={isMultiSelected}
+        onChange={(e) => {
+          // 阻止事件冒泡，防止触发两次选择事件
+          e.stopPropagation();
+          toggleChatSelection(chatId, chat);
+        }}
+      />
+    </div>
   );
 
   return (
     <ListItem
-      ref={ref}
+      ref={containerRef}
       className={chatClassName}
-      href={href}
       style={`top: ${offsetTop}px`}
-      ripple={!isForum && !isMobile}
-      contextActions={contextActions}
+      ripple={!(chat?.isForum) && !isMobile}
       onClick={handleClick}
       onDragEnter={handleDragEnter}
-      withPortalForMenu
+      leftElement={renderCheckbox()}
+      selected={isMultiSelected}
     >
       <div className={buildClassName('status', 'status-clickable')}>
         <Avatar
@@ -385,8 +392,11 @@ const Chat: FC<OwnProps & StateProps> = ({
           )}
         </div>
         <div className="subtitle">
-          {renderSubtitle()}
-          {!isPreview && (
+          {/* 使用lastMessage的内容或显示默认文本 */}
+          <div className="last-message">
+            {lastMessage?.content.text?.text || '无消息'}
+          </div>
+          {!isPreview && chat && (
             <ChatBadge
               chat={chat}
               isPinned={isPinned}

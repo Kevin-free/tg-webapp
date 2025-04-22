@@ -69,6 +69,7 @@ interface OwnProps {
   withPortalForMenu?: boolean;
   menuBubbleClassName?: string;
   href?: string;
+  selected?: boolean;
   onMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
   onClick?: (e: React.MouseEvent<HTMLElement>, arg?: any) => void;
   onContextMenu?: (e: React.MouseEvent<HTMLElement>) => void;
@@ -107,6 +108,7 @@ const ListItem: FC<OwnProps> = ({
   contextActions,
   withPortalForMenu,
   href,
+  selected,
   onMouseDown,
   onClick,
   onContextMenu,
@@ -215,6 +217,7 @@ const ListItem: FC<OwnProps> = ({
     multiline && 'multiline',
     isStatic && 'is-static',
     withColorTransition && 'with-color-transition',
+    selected && 'selected',
   );
 
   const ButtonElementTag = href ? 'a' : 'div';
