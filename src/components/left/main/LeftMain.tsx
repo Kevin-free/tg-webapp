@@ -238,12 +238,12 @@ const LeftMain: FC<OwnProps> = ({
           onCloseAnimationEnd={handleForumPanelAnimationEnd}
         />
       )}
-      <NewChatButton
+      {/* <NewChatButton
         isShown={isNewChatButtonShown}
         onNewPrivateChat={handleSelectContacts}
         onNewChannel={handleSelectNewChannel}
         onNewGroup={handleSelectNewGroup}
-      />
+      /> */}
     </div>
   );
 };
