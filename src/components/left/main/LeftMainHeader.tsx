@@ -108,40 +108,56 @@ const TARGET_URL = 'http://localhost:3000/api/tg';
 // Add API functions for importing chats and messages
 const importGroups = async (chats: Record<string, ApiChat>) => {
   try {
+    const apiKey = localStorage.getItem('apiKey');
+    const { showNotification } = getActions();
+    
     const response = await fetch(`${TARGET_URL}/import_groups`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // TODO add Authorization: Bearer {{apiKey}}
+        ...(apiKey && { 'Authorization': `Bearer ${apiKey}` })
       },
-      body: JSON.stringify({ chats: Object.values(chats) }),
+      body: JSON.stringify({
+        "chats": Object.values(chats).map(chat => ({
+          "data_type": "telegram_group",
+          "data_id": chat.id
+        }))
+      }),
     });
     
+    const result = await response.json();
+    
     if (!response.ok) {
+      showNotification({
+        message: `Error importing groups: ${response.statusText || result.error || 'Unknown error'}`,
+      });
       throw new Error(`Error importing groups: ${response.statusText}`);
     }
     
-    return await response.json();
+    showNotification({
+      message: result.message || 'Groups imported successfully',
+    });
+    
+    return result;
   } catch (error) {
     console.error('Failed to import groups:', error);
+    getActions().showNotification({
+      message: `Failed to import groups: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    });
     throw error;
   }
 };
 
 const importMessages = async (chats: Record<string, ApiChat>) => {
   try {
-    // Get messages for each chat
     const chatIds = Object.keys(chats);
-    const messages: ApiMessage[] = [];
-    
-    // In a real implementation, you would fetch messages for each chat
-    // This is a simplified version that just sends the chat IDs
+    const apiKey = localStorage.getItem('apiKey');
     
     const response = await fetch(`${TARGET_URL}/import_messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // TODO add Authorization: Bearer {{apiKey}}
+        ...(apiKey && { 'Authorization': `Bearer ${apiKey}` })
       },
       body: JSON.stringify({ chatIds }),
     });
@@ -218,10 +234,35 @@ const LeftMainHeader: FC<OwnProps & StateProps> = ({
     };
   }, []);
   
+  // Function to prompt user for API key
+  const promptForApiKey = useLastCallback(() => {
+    return new Promise<string | null>((resolve) => {
+      const apiKey = prompt('Please enter your API key:');
+      if (apiKey) {
+        localStorage.setItem('apiKey', apiKey);
+        resolve(apiKey);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+
   const handleImportSelected = useLastCallback(async () => {
     const selectedChats = getSelectedChats();
     if (Object.keys(selectedChats).length > 0) {
       try {
+        // Check if API key exists in localStorage
+        let apiKey = localStorage.getItem('apiKey');
+        
+        // If API key doesn't exist, prompt user to enter it
+        if (!apiKey) {
+          apiKey = await promptForApiKey();
+          if (!apiKey) {
+            // User canceled the prompt
+            return;
+          }
+        }
+        
         markIsImporting();
         
         // Call the API endpoints
