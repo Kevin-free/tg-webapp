@@ -2,7 +2,7 @@ import type { FC } from '../../../lib/teact/teact';
 import React, {
   memo, useEffect, useMemo, useRef, useState,
 } from '../../../lib/teact/teact';
-import { getActions, withGlobal } from '../../../global';
+import { getActions, getGlobal, withGlobal } from '../../../global';
 
 import type { GlobalState } from '../../../global/types';
 import type { ISettings } from '../../../types';
@@ -152,23 +152,68 @@ const importMessages = async (chats: Record<string, ApiChat>) => {
   try {
     const chatIds = Object.keys(chats);
     const apiKey = localStorage.getItem('apiKey');
+    const global = getGlobal();
+    const { showNotification } = getActions();
     
+    // Prepare messages in the required format
+    const formattedMessages = [];
+    
+    for (const chatId of chatIds) {
+      const chatMessages = global.messages.byChatId[chatId]?.byId;
+      
+      if (chatMessages) {
+        // Get message IDs and sort them in descending order (newest first)
+        const messageIds = Object.keys(chatMessages)
+          .map(Number)
+          .sort((a, b) => b - a)
+          .slice(0, 500); // Take only the 500 most recent messages
+        
+        // Format each message according to the required structure
+        for (const id of messageIds) {
+          const message = chatMessages[id];
+          if (message && message.content.text) {
+            formattedMessages.push({
+              message_id: message.id.toString(),
+              data_type: "telegram_group",
+              data_id: message.chatId,
+              message_text: message.content.text.text,
+              message_timestamp: message.date,
+              sender_id: message.senderId
+            });
+          }
+        }
+      }
+    }
+    
+    // Send the messages to the API with the correct format
     const response = await fetch(`${TARGET_URL}/import_messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(apiKey && { 'Authorization': `Bearer ${apiKey}` })
+        'Authorization': `Bearer ${apiKey || ''}`
       },
-      body: JSON.stringify({ chatIds }),
+      body: JSON.stringify({ messages: formattedMessages }),
     });
     
     if (!response.ok) {
-      throw new Error(`Error importing messages: ${response.statusText}`);
+      const errorText = `Error importing messages: ${response.statusText}`;
+      showNotification({
+        message: errorText,
+      });
+      throw new Error(errorText);
     }
     
-    return await response.json();
+    const result = await response.json();
+    showNotification({
+      message: result.message || 'Messages imported successfully',
+    });
+    
+    return result;
   } catch (error) {
     console.error('Failed to import messages:', error);
+    getActions().showNotification({
+      message: `Failed to import messages: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    });
     throw error;
   }
 };
