@@ -103,13 +103,16 @@ type StateProps =
 const CLEAR_DATE_SEARCH_PARAM = { date: undefined };
 const CLEAR_CHAT_SEARCH_PARAM = { id: undefined };
 
+const TARGET_URL = 'http://localhost:3000/api/tg';
+
 // Add API functions for importing chats and messages
 const importGroups = async (chats: Record<string, ApiChat>) => {
   try {
-    const response = await fetch('/import_groups', {
+    const response = await fetch(`${TARGET_URL}/import_groups`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        // TODO add Authorization: Bearer {{apiKey}}
       },
       body: JSON.stringify({ chats: Object.values(chats) }),
     });
@@ -134,10 +137,11 @@ const importMessages = async (chats: Record<string, ApiChat>) => {
     // In a real implementation, you would fetch messages for each chat
     // This is a simplified version that just sends the chat IDs
     
-    const response = await fetch('/import_messages', {
+    const response = await fetch(`${TARGET_URL}/import_messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        // TODO add Authorization: Bearer {{apiKey}}
       },
       body: JSON.stringify({ chatIds }),
     });
