@@ -256,10 +256,15 @@ export default function createConfig(
 }
 
 function getGitMetadata() {
-  const gitRevisionPlugin = new GitRevisionPlugin();
-  const branch = HEAD || gitRevisionPlugin.branch();
-  const commit = gitRevisionPlugin.commithash()?.substring(0, 7);
-  return { branch, commit };
+  try {
+    const gitRevisionPlugin = new GitRevisionPlugin();
+    const branch = HEAD || gitRevisionPlugin.branch();
+    const commit = gitRevisionPlugin.commithash()?.substring(0, 7);
+    return { branch, commit };
+  } catch (error) {
+    console.warn('Failed to get Git metadata, using fallback values:', error);
+    return { branch: 'unknown', commit: 'unknown' };
+  }
 }
 
 class WebpackContextExtension {
