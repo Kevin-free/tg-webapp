@@ -257,6 +257,16 @@ export default function createConfig(
 
 function getGitMetadata() {
   try {
+    // Check if we're in a git repository first
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Check if .git directory exists
+    if (!fs.existsSync(path.resolve(__dirname, '.git'))) {
+      console.warn('No Git repository found, using fallback values');
+      return { branch: 'unknown', commit: 'unknown' };
+    }
+    
     const gitRevisionPlugin = new GitRevisionPlugin();
     const branch = HEAD || gitRevisionPlugin.branch();
     const commit = gitRevisionPlugin.commithash()?.substring(0, 7);
